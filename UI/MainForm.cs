@@ -594,7 +594,7 @@ namespace FirestormTwwMonitor.UI
                     string worldState = session.GameState switch
                     {
                         ClientGameState.InWorld => "🟢 在线",
-                        ClientGameState.CharSelect => "⏳ 选角中",
+                        ClientGameState.CharSelect => "⏳ 待进游戏(未在线)",
                         _ => "🔴 离线"
                     };
                     string reconnectState = ctx.IsMonitored ? ctx.ReconnectCtrl.StatusDescription : "⏹ 未开启";
@@ -845,16 +845,6 @@ namespace FirestormTwwMonitor.UI
                     BackgroundInput.ActivateWindow(hWnd);
                 }
             }
-        }
-
-        private void OpenSpeedHack(int targetPid)
-        {
-            var form = new SpeedHackForm(targetPid)
-            {
-                GetContexts = () => { lock (_lock) { return _contexts.ToList(); } }
-            };
-            form.Show(this);
-            form.RefreshProcessList();
         }
 
         private void TestSendEnter()

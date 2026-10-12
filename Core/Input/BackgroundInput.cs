@@ -190,6 +190,8 @@ namespace FirestormTwwMonitor.Core.Input
                 // 1. 发送后台回车（包含 WM_ACTIVATE + WM_SETFOCUS + WM_KEYDOWN + WM_CHAR + WM_KEYUP）
                 SendBackgroundKey(hWnd, Win32Api.VK_RETURN, 60);
 
+                Thread.Sleep(80);
+
                 // 2. 双保险：在角色选择界面，同时向屏幕底部中间【进入游戏】按钮 (50%, 92%) 发送后台左键点击
                 SendBackgroundClickRel(hWnd, relX, relY, 50);
 

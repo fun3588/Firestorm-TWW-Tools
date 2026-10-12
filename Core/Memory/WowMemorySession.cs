@@ -331,7 +331,23 @@ namespace FirestormTwwMonitor.Core.Memory
                 return false;
             }
 
-            // 检查当前玩家是否在世界中存活并有实体对象
+            // 1. 核心判定：读取当前全局角色名称
+            // 当角色在世界中时，此处必为有效名字；而在选角界面（未选角·待进游戏）或离线状态，此处必定为空
+            string activeName = GetPlayerName();
+            if (string.IsNullOrWhiteSpace(activeName))
+            {
+                if (IsInWorld)
+                {
+                    IsInWorld = false;
+                    PlayerObj = 0;
+                    CMovement = 0;
+                    OnPlayerLoggedOut?.Invoke();
+                }
+                GameState = ClientGameState.CharSelect;
+                return false;
+            }
+
+            // 2. 检查当前玩家是否在世界中存活并有实体对象
             bool playerAlive = IsPlayerAlive();
             if (!playerAlive)
             {
@@ -364,8 +380,7 @@ namespace FirestormTwwMonitor.Core.Memory
 
         public string GetPlayerName()
         {
-            if (!IsInWorld || PlayerObj == 0) return string.Empty;
-            if (!IsValidPtr(ModuleBase + Offsets.OFF_NAME_GLOBAL)) return string.Empty;
+            if (!IsAttached || !IsValidPtr(ModuleBase + Offsets.OFF_NAME_GLOBAL)) return string.Empty;
             return ReadString(ModuleBase + Offsets.OFF_NAME_GLOBAL, 32);
         }
 

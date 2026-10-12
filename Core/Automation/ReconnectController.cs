@@ -131,7 +131,7 @@ namespace FirestormTwwMonitor.Core.Automation
                     CurrentRetryAttempts++;
                     CurrentState = ReconnectState.Step3_EnterWorld;
                     SetStatus($"重连中 (第{CurrentRetryAttempts}次, 每{StepIntervalSeconds}s重试)...");
-                    Log($"[未进世界·PID {_session.ProcessId}] 发送后台回车进游戏 (第 {CurrentRetryAttempts} 次重试, 间隔 {StepIntervalSeconds} 秒)...");
+                    Log($"[未在线·待进游戏·PID {_session.ProcessId}] 自动发送后台回车进游戏 (第 {CurrentRetryAttempts} 次重试, 间隔 {StepIntervalSeconds} 秒)...");
 
                     // 发送回车
                     ExecuteSendEnter(hWnd);
