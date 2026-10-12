@@ -71,8 +71,7 @@ namespace FirestormTwwMonitor.Core.Automation
             IntPtr hWnd = _session.GetOrRefreshWindowHandle();
             if (hWnd != IntPtr.Zero)
             {
-                string modeDesc = InputMode == ReconnectInputMode.BackgroundMessage ? "后台回车" : "前台硬件回车";
-                Log($"[立即重连] 手动触发：立即发送 {modeDesc} 进游戏 (第 {CurrentRetryAttempts} 次，以 {StepIntervalSeconds} 秒间隔重试)...");
+                Log($"[立即重连] 手动触发：立即发送后台回车进游戏 (第 {CurrentRetryAttempts} 次，以 {StepIntervalSeconds} 秒间隔重试)...");
                 ExecuteSendEnter(hWnd);
             }
             else
@@ -169,7 +168,7 @@ namespace FirestormTwwMonitor.Core.Automation
             if (hWnd == IntPtr.Zero) return;
 
             // 执行与测试按钮完全一致的双保险动作：WM_ACTIVATE + 回车 + 选角界面底部【进入游戏】按钮点击
-            BackgroundInput.SendReconnectAction(hWnd, InputMode, 0.50, 0.92);
+            BackgroundInput.SendReconnectAction(hWnd, 0.50, 0.92);
         }
 
         private void CompleteReconnect()

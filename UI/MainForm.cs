@@ -39,8 +39,6 @@ namespace FirestormTwwMonitor.UI
         // 选中账号控制卡片控件
         private Label _lblSelectedAccount = null!;
         private CheckBox _chkAutoReconnect = null!;
-        private ComboBox _cmbInputMode = null!;
-        private ReconnectInputMode _currentInputMode = ReconnectInputMode.BackgroundMessage;
         private NumericUpDown _numInterval = null!;
         private Label _lblDetailStats = null!;
 
@@ -197,16 +195,8 @@ namespace FirestormTwwMonitor.UI
             _btnTestEnter = new Button { Text = "↵ 后台回车测试", AutoSize = true, MinimumSize = new Size(95, 32) };
             _btnTestEnter.Click += (s, e) => TestSendEnter();
             UiTheme.StyleButton(_btnTestEnter);
-            _btnTestEnter.Margin = new Padding(0, 0, 8, 4);
+            _btnTestEnter.Margin = new Padding(0, 0, 0, 4);
             _toolbar.Controls.Add(_btnTestEnter);
-
-            // ── 变速器（Speed Hack）按钮 ─────────────────────────────────
-            var btnSpeedHack = new Button { Text = "⚡ 变速器", AutoSize = true, MinimumSize = new Size(90, 32) };
-            btnSpeedHack.Click += (s, e) => OpenSpeedHack(_selectedContext?.ProcessInfo.Pid ?? 0);
-            UiTheme.StyleButton(btnSpeedHack, primary: true);
-            btnSpeedHack.BackColor = Color.FromArgb(124, 58, 237); // 紫色高亮
-            btnSpeedHack.Margin = new Padding(0, 0, 0, 4);
-            _toolbar.Controls.Add(btnSpeedHack);
 
             layout.Controls.Add(_toolbar, 0, 1);
 
@@ -313,7 +303,6 @@ namespace FirestormTwwMonitor.UI
             cms.Items.Add("⏹ 停止此客户端监控", null, (s, e) => ToggleSelectedMonitor(false));
             cms.Items.Add(new ToolStripSeparator());
             cms.Items.Add("🪟 激活置前窗口", null, (s, e) => BringSelectedToFront());
-            cms.Items.Add("⚡ 变速此客户端 (Speed Hack)...", null, (s, e) => OpenSpeedHack(_selectedContext?.ProcessInfo.Pid ?? 0));
             cms.Items.Add("↵ 后台发送回车测试", null, (s, e) => TestSendEnter());
             cms.Items.Add(new ToolStripSeparator());
             cms.Items.Add("❌ 关闭游戏进程", null, (s, e) => CloseSelectedProcess());
@@ -412,36 +401,15 @@ namespace FirestormTwwMonitor.UI
             };
             pnlRow1.Controls.Add(_chkAutoReconnect);
 
-            var lblInputMode = new Label { Text = "重连方式:", AutoSize = true, Margin = new Padding(0, 6, 4, 0) };
-            _cmbInputMode = new ComboBox
+            var lblModeNotice = new Label
             {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 185,
-                Font = new Font("Microsoft YaHei UI", 8.5f),
-                Margin = new Padding(0, 2, 14, 0)
+                Text = "⚡ 模式: 纯后台消息 (不抢焦点)",
+                AutoSize = true,
+                ForeColor = Color.FromArgb(5, 150, 105),
+                Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+                Margin = new Padding(0, 5, 14, 0)
             };
-            _cmbInputMode.Items.AddRange(new object[]
-            {
-                "纯后台消息 (不抢焦点·回车进入)",
-                "前台硬件模拟 (短暂激活窗口)"
-            });
-            _cmbInputMode.SelectedIndex = 0;
-            _cmbInputMode.SelectedIndexChanged += (s, e) =>
-            {
-                _currentInputMode = _cmbInputMode.SelectedIndex == 0
-                    ? ReconnectInputMode.BackgroundMessage
-                    : ReconnectInputMode.ForegroundHardware;
-
-                lock (_lock)
-                {
-                    foreach (var c in _contexts)
-                    {
-                        c.ReconnectCtrl.InputMode = _currentInputMode;
-                    }
-                }
-                SetStatus($"重连输入模式已切换为: {_cmbInputMode.SelectedItem}");
-            };
-            pnlRow1.Controls.AddRange(new Control[] { lblInputMode, _cmbInputMode });
+            pnlRow1.Controls.Add(lblModeNotice);
 
             var lblInterval = new Label { Text = "重试间隔(秒):", AutoSize = true, Margin = new Padding(0, 6, 4, 0) };
             _numInterval = new NumericUpDown { Minimum = 1, Maximum = 30, Value = 4, Width = 45, Margin = new Padding(0, 3, 0, 0) };
@@ -516,10 +484,7 @@ namespace FirestormTwwMonitor.UI
                                 ProcessInfo = p,
                                 Session = new WowMemorySession()
                             };
-                            ctx.ReconnectCtrl = new ReconnectController(ctx.Session)
-                            {
-                                InputMode = _currentInputMode
-                            };
+                            ctx.ReconnectCtrl = new ReconnectController(ctx.Session);
                             ctx.Tracker = new GatheringTracker(ctx.Session);
 
                             int pid = p.Pid;
@@ -765,7 +730,6 @@ namespace FirestormTwwMonitor.UI
                 {
                     ctx.IsMonitored = true;
                     ctx.ReconnectCtrl.AutoReconnectEnabled = true;
-                    ctx.ReconnectCtrl.InputMode = _currentInputMode;
                     ctx.ReconnectCtrl.Start();
                     ctx.Tracker.Start();
                 }
@@ -856,7 +820,6 @@ namespace FirestormTwwMonitor.UI
                 ctx.ReconnectCtrl.AutoReconnectEnabled = start;
                 if (start)
                 {
-                    ctx.ReconnectCtrl.InputMode = _currentInputMode;
                     ctx.ReconnectCtrl.Start();
                     ctx.Tracker.Start();
                     SetStatus($"客户端 PID {ctx.ProcessInfo.Pid} 启动单独监控");
@@ -904,10 +867,9 @@ namespace FirestormTwwMonitor.UI
                 {
                     Task.Run(() =>
                     {
-                        BackgroundInput.SendReconnectAction(hWnd, _currentInputMode, 0.50, 0.92);
+                        BackgroundInput.SendReconnectAction(hWnd, 0.50, 0.92);
                     });
-                    string modeDesc = _currentInputMode == ReconnectInputMode.ForegroundHardware ? "前台硬件模拟" : "纯后台消息";
-                    SetStatus($"已向客户端 PID {ctx.ProcessInfo.Pid} 发送 [{modeDesc}] 回车+进游戏测试");
+                    SetStatus($"已向客户端 PID {ctx.ProcessInfo.Pid} 发送 [纯后台消息] 回车+进游戏测试");
                     return;
                 }
             }

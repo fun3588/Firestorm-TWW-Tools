@@ -8,14 +8,9 @@ namespace FirestormTwwMonitor.Core.Input
     public enum ReconnectInputMode
     {
         /// <summary>
-        /// 前台硬件级模拟（短暂激活窗口 + DirectInput 硬件扫描码回车 + 屏幕相对比例点击，100% 稳定）
+        /// 纯后台消息模式（不抢占前台焦点，发送 WM_ACTIVATE + WM_SETFOCUS + WM_KEYDOWN/CHAR/KEYUP + 后台坐标点击）
         /// </summary>
-        ForegroundHardware = 0,
-
-        /// <summary>
-        /// 纯后台消息模式（不抢窗口焦点，发送 WM_ACTIVATE + WM_KEYDOWN/CHAR/KEYUP + 后台相对坐标点击）
-        /// </summary>
-        BackgroundMessage = 1
+        BackgroundMessage = 0
     }
 
     public static class BackgroundInput
@@ -176,9 +171,10 @@ namespace FirestormTwwMonitor.Core.Input
         }
 
         /// <summary>
-        /// 执行重连步骤动作：回车键 + 窗口客户区相对比例位置 (relX, relY) 点击双保险
+        /// 执行重连步骤动作：纯后台回车键 + 窗口客户区相对比例位置 (relX, relY) 点击双保险
+        /// 100% 纯后台静默执行，不抢占前台焦点，不移动鼠标，不干扰用户操作
         /// </summary>
-        public static bool SendReconnectAction(IntPtr hWnd, ReconnectInputMode mode, double relX = 0.50, double relY = 0.92)
+        public static bool SendReconnectAction(IntPtr hWnd, double relX = 0.50, double relY = 0.92)
         {
             if (hWnd == IntPtr.Zero) return false;
 
@@ -191,48 +187,11 @@ namespace FirestormTwwMonitor.Core.Input
                     Thread.Sleep(80);
                 }
 
-                // 1. 计算窗口客户区相对像素坐标
-                int cx = 0, cy = 0;
-                bool hasRect = Win32Api.GetClientRect(hWnd, out var rect) && rect.Width > 100 && rect.Height > 100;
-                if (hasRect)
-                {
-                    cx = (int)(rect.Width * relX);
-                    cy = (int)(rect.Height * relY);
-                }
+                // 1. 发送后台回车（包含 WM_ACTIVATE + WM_SETFOCUS + WM_KEYDOWN + WM_CHAR + WM_KEYUP）
+                SendBackgroundKey(hWnd, Win32Api.VK_RETURN, 60);
 
-                if (mode == ReconnectInputMode.ForegroundHardware)
-                {
-                    // 前台硬件模式：短暂置前 -> 硬件扫描码回车 -> 相对比例位置点击
-                    ActivateWindow(hWnd);
-                    Thread.Sleep(80);
-
-                    SendHardwareKey(hWnd, Win32Api.VK_RETURN, 60);
-
-                    if (hasRect && relX > 0 && relY > 0)
-                    {
-                        Thread.Sleep(100);
-                        var pt = new Win32Api.POINT { X = cx, Y = cy };
-                        if (Win32Api.ClientToScreen(hWnd, ref pt))
-                        {
-                            Win32Api.SetCursorPos(pt.X, pt.Y);
-                            Thread.Sleep(30);
-                            Win32Api.mouse_event(Win32Api.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
-                            Thread.Sleep(50);
-                            Win32Api.mouse_event(Win32Api.MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
-                        }
-                        SendBackgroundClick(hWnd, cx, cy, 40);
-                    }
-                }
-                else
-                {
-                    // 纯后台消息模式：不置前，发送后台回车 + 后台坐标点击
-                    SendBackgroundEnter(hWnd, 60);
-                    if (hasRect && relX > 0 && relY > 0)
-                    {
-                        Thread.Sleep(80);
-                        SendBackgroundClick(hWnd, cx, cy, 50);
-                    }
-                }
+                // 2. 双保险：在角色选择界面，同时向屏幕底部中间【进入游戏】按钮 (50%, 92%) 发送后台左键点击
+                SendBackgroundClickRel(hWnd, relX, relY, 50);
 
                 return true;
             }
@@ -240,6 +199,11 @@ namespace FirestormTwwMonitor.Core.Input
             {
                 return false;
             }
+        }
+
+        public static bool SendReconnectAction(IntPtr hWnd, ReconnectInputMode mode, double relX = 0.50, double relY = 0.92)
+        {
+            return SendReconnectAction(hWnd, relX, relY);
         }
 
         /// <summary>
