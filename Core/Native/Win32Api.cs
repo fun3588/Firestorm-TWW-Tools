@@ -91,7 +91,9 @@ namespace FirestormTwwMonitor.Core.Native
         public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
         public const uint WM_ACTIVATE = 0x0006;
+        public const uint WM_SETFOCUS = 0x0007;
         public const int SW_RESTORE = 9;
+        public const int SW_SHOWNOACTIVATE = 4;
         public const uint INPUT_KEYBOARD = 1;
         public const uint KEYEVENTF_KEYUP = 0x0002;
         public const uint KEYEVENTF_SCANCODE = 0x0008;

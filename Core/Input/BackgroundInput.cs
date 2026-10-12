@@ -21,7 +21,7 @@ namespace FirestormTwwMonitor.Core.Input
     public static class BackgroundInput
     {
         /// <summary>
-        /// 后台向指定窗口句柄发送指定虚拟按键（包含 DirectInput 硬件扫描码）
+        /// 后台向指定窗口句柄发送指定虚拟按键（包含 DirectInput 硬件扫描码与 WM_ACTIVATE 唤醒）
         /// </summary>
         public static bool SendBackgroundKey(IntPtr hWnd, int virtualKey, int holdMs = 60)
         {
@@ -34,11 +34,25 @@ namespace FirestormTwwMonitor.Core.Input
                 long lParamDown = 1 | (scanCode << 16);
                 long lParamUp = 1 | (scanCode << 16) | (1L << 30) | (1L << 31);
 
+                // 1. 发送 WM_ACTIVATE (WA_ACTIVE=1) 与 WM_SETFOCUS，让后台窗口就绪接收键盘消息
+                Win32Api.PostMessage(hWnd, Win32Api.WM_ACTIVATE, (IntPtr)1, IntPtr.Zero);
+                Win32Api.PostMessage(hWnd, Win32Api.WM_SETFOCUS, IntPtr.Zero, IntPtr.Zero);
+
+                // 2. 发送 WM_KEYDOWN
                 Win32Api.PostMessage(hWnd, Win32Api.WM_KEYDOWN, (IntPtr)virtualKey, (IntPtr)lParamDown);
+
+                // 3. 若为回车键，补发字符消息 WM_CHAR ('\r' / 13) 确保被 GlueXML/UI 侦听
+                if (virtualKey == Win32Api.VK_RETURN)
+                {
+                    Win32Api.PostMessage(hWnd, Win32Api.WM_CHAR, (IntPtr)13, (IntPtr)lParamDown);
+                }
+
                 if (holdMs > 0)
                 {
                     Thread.Sleep(holdMs);
                 }
+
+                // 4. 发送 WM_KEYUP
                 Win32Api.PostMessage(hWnd, Win32Api.WM_KEYUP, (IntPtr)virtualKey, (IntPtr)lParamUp);
                 return true;
             }
@@ -49,11 +63,14 @@ namespace FirestormTwwMonitor.Core.Input
         }
 
         /// <summary>
-        /// 后台向指定窗口发送回车键
+        /// 后台向指定窗口发送回车键 + 选角界面底部【进入游戏】按钮点击双保险
         /// </summary>
         public static bool SendBackgroundEnter(IntPtr hWnd, int holdMs = 60)
         {
-            return SendBackgroundKey(hWnd, Win32Api.VK_RETURN, holdMs);
+            bool ok = SendBackgroundKey(hWnd, Win32Api.VK_RETURN, holdMs);
+            // 双保险：在角色选择界面，同时向屏幕底部中间【进入游戏】按钮 (50%, 92%) 发送后台点击
+            SendBackgroundClickRel(hWnd, 0.50, 0.92, 40);
+            return ok;
         }
 
         /// <summary>
@@ -144,14 +161,36 @@ namespace FirestormTwwMonitor.Core.Input
         }
 
         /// <summary>
+        /// 后台向窗口指定相对客户区比例坐标 (relX, relY) 模拟点击左键
+        /// </summary>
+        public static bool SendBackgroundClickRel(IntPtr hWnd, double relX, double relY, int holdMs = 60)
+        {
+            if (hWnd == IntPtr.Zero) return false;
+            if (Win32Api.GetClientRect(hWnd, out var rect) && rect.Width > 100 && rect.Height > 100)
+            {
+                int cx = (int)(rect.Width * relX);
+                int cy = (int)(rect.Height * relY);
+                return SendBackgroundClick(hWnd, cx, cy, holdMs);
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 执行重连步骤动作：回车键 + 窗口客户区相对比例位置 (relX, relY) 点击双保险
         /// </summary>
-        public static bool SendReconnectAction(IntPtr hWnd, ReconnectInputMode mode, double relX, double relY)
+        public static bool SendReconnectAction(IntPtr hWnd, ReconnectInputMode mode, double relX = 0.50, double relY = 0.92)
         {
             if (hWnd == IntPtr.Zero) return false;
 
             try
             {
+                // 若窗口处于最小化状态，先以不激活方式恢复尺寸，确保能正常接收后台消息与坐标点击
+                if (Win32Api.IsIconic(hWnd))
+                {
+                    Win32Api.ShowWindow(hWnd, Win32Api.SW_SHOWNOACTIVATE);
+                    Thread.Sleep(80);
+                }
+
                 // 1. 计算窗口客户区相对像素坐标
                 int cx = 0, cy = 0;
                 bool hasRect = Win32Api.GetClientRect(hWnd, out var rect) && rect.Width > 100 && rect.Height > 100;

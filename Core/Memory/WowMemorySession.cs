@@ -63,7 +63,18 @@ namespace FirestormTwwMonitor.Core.Memory
 
         public IntPtr GetOrRefreshWindowHandle()
         {
-            if ((MainWindowHandle == IntPtr.Zero || !Win32Api.IsWindow(MainWindowHandle)) && ProcessId > 0)
+            bool needRefresh = MainWindowHandle == IntPtr.Zero || !Win32Api.IsWindow(MainWindowHandle);
+            if (!needRefresh)
+            {
+                var sbClass = new StringBuilder(128);
+                Win32Api.GetClassName(MainWindowHandle, sbClass, sbClass.Capacity);
+                if (!sbClass.ToString().Equals("GxWindowClass", StringComparison.OrdinalIgnoreCase))
+                {
+                    needRefresh = true;
+                }
+            }
+
+            if (needRefresh && ProcessId > 0)
             {
                 MainWindowHandle = WowProcessManager.FindWindowForProcess(ProcessId);
             }
@@ -78,11 +89,21 @@ namespace FirestormTwwMonitor.Core.Memory
             {
                 var process = Process.GetProcessById(pid);
                 ProcessId = process.Id;
-                MainWindowHandle = windowHandle != IntPtr.Zero ? windowHandle : process.MainWindowHandle;
-                if (MainWindowHandle == IntPtr.Zero)
+                IntPtr targetHwnd = windowHandle != IntPtr.Zero ? windowHandle : process.MainWindowHandle;
+                if (targetHwnd != IntPtr.Zero)
                 {
-                    MainWindowHandle = WowProcessManager.FindWindowForProcess(ProcessId);
+                    var sbClass = new StringBuilder(128);
+                    Win32Api.GetClassName(targetHwnd, sbClass, sbClass.Capacity);
+                    if (!sbClass.ToString().Equals("GxWindowClass", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetHwnd = WowProcessManager.FindWindowForProcess(ProcessId);
+                    }
                 }
+                else
+                {
+                    targetHwnd = WowProcessManager.FindWindowForProcess(ProcessId);
+                }
+                MainWindowHandle = targetHwnd;
 
                 ProcessHandle = Win32Api.OpenProcess(Win32Api.PROCESS_ALL_ACCESS, false, ProcessId);
 

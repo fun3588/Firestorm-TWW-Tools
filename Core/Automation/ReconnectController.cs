@@ -168,16 +168,8 @@ namespace FirestormTwwMonitor.Core.Automation
         {
             if (hWnd == IntPtr.Zero) return;
 
-            if (InputMode == ReconnectInputMode.BackgroundMessage)
-            {
-                // 纯后台消息：发送 VK_RETURN 扫描码 0x1C (WM_KEYDOWN + 60ms + WM_KEYUP)
-                BackgroundInput.SendBackgroundEnter(hWnd, 60);
-            }
-            else
-            {
-                // 前台硬件模拟：短暂置前 + 硬件扫描码回车
-                BackgroundInput.SendHardwareKey(hWnd, Win32Api.VK_RETURN, 60);
-            }
+            // 执行与测试按钮完全一致的双保险动作：WM_ACTIVATE + 回车 + 选角界面底部【进入游戏】按钮点击
+            BackgroundInput.SendReconnectAction(hWnd, InputMode, 0.50, 0.92);
         }
 
         private void CompleteReconnect()

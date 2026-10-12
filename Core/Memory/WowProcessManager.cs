@@ -38,7 +38,8 @@ namespace FirestormTwwMonitor.Core.Memory
 
         public static IntPtr FindWindowForProcess(int pid)
         {
-            IntPtr found = IntPtr.Zero;
+            IntPtr gxWnd = IntPtr.Zero;
+            IntPtr fallbackWnd = IntPtr.Zero;
             try
             {
                 Win32Api.EnumWindows((hWnd, lParam) =>
@@ -50,7 +51,7 @@ namespace FirestormTwwMonitor.Core.Memory
                         Win32Api.GetClassName(hWnd, sbClass, 256);
                         if (sbClass.ToString().Equals("GxWindowClass", StringComparison.OrdinalIgnoreCase))
                         {
-                            found = hWnd;
+                            gxWnd = hWnd;
                             return false;
                         }
 
@@ -58,8 +59,10 @@ namespace FirestormTwwMonitor.Core.Memory
                         Win32Api.GetWindowText(hWnd, sbTitle, 256);
                         if (IsExactWowWindowTitle(sbTitle.ToString()))
                         {
-                            found = hWnd;
-                            return false;
+                            if (fallbackWnd == IntPtr.Zero)
+                            {
+                                fallbackWnd = hWnd;
+                            }
                         }
                     }
                     return true;
@@ -68,7 +71,7 @@ namespace FirestormTwwMonitor.Core.Memory
             catch
             {
             }
-            return found;
+            return gxWnd != IntPtr.Zero ? gxWnd : fallbackWnd;
         }
 
         public static List<WowProcessItem> FindWowProcesses()
