@@ -119,7 +119,9 @@ public:
     int GetTotalGained() const {
         int total = 0;
         for (const auto& it : items) {
-            total += it.GetGainedCount();
+            if (it.category == "矿石") {
+                total += it.GetGainedCount();
+            }
         }
         return total;
     }
@@ -130,12 +132,12 @@ public:
         return static_cast<double>(GetTotalGained()) / hours;
     }
 
-    // 格式化输出简明背包矿草摘要
+    // 格式化输出简明背包矿石与空位摘要：只显示矿石存量与背包空位
     std::string GetInventorySummary() const {
         std::string summary;
         int activeCount = 0;
         for (const auto& it : items) {
-            if (it.currentCount > 0) {
+            if (it.category == "矿石" && it.currentCount > 0) {
                 if (activeCount > 0) summary += " | ";
                 summary += it.name + ":" + std::to_string(it.currentCount);
                 if (it.GetGainedCount() > 0) {
@@ -145,8 +147,8 @@ public:
             }
         }
         if (summary.empty()) {
-            return "包:" + std::to_string(occupiedSlots) + "/" + std::to_string(totalSlots) + " (空" + std::to_string(freeSlots) + ")";
+            return "空位: " + std::to_string(freeSlots) + "格 (无矿石)";
         }
-        return summary + " [空" + std::to_string(freeSlots) + "]";
+        return summary + " [空位:" + std::to_string(freeSlots) + "]";
     }
 };

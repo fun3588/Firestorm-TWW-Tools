@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <mutex>
 #include <sstream>
 #include <iomanip>
 
@@ -19,7 +18,7 @@
 // 启用 Visual Styles
 #pragma comment(lib, "comctl32.lib")
 
-// 客户端监控上下文
+// 客户端监控上下文 (全部在主 UI 线程无锁顺滑调度，零死锁)
 struct ClientContext {
     WowProcessItem procInfo;
     std::unique_ptr<WowMemorySession> session;
@@ -39,11 +38,11 @@ struct ClientContext {
     }
 };
 
-// 字体大小模式枚举
+// 字体大小模式枚举：小 / 中(默认) / 大
 enum class FontSizeMode {
-    Default = 0, // 默认 (15px)
-    Medium  = 1, // 中 (18px)
-    Large   = 2  // 大 (21px)
+    Small  = 0, // 小 (15px)
+    Medium = 1, // 中 (默认 18px)
+    Large  = 2  // 大 (21px)
 };
 
 // 全局句柄与变量
@@ -70,12 +69,12 @@ HWND g_hIntervalEdit = nullptr;
 HWND g_hIntervalSecLabel = nullptr;
 
 HWND g_hFontLabel = nullptr;
-HWND g_hBtnFontDefault = nullptr;
+HWND g_hBtnFontSmall = nullptr;
 HWND g_hBtnFontMedium = nullptr;
 HWND g_hBtnFontLarge = nullptr;
 
-// 字体与画刷
-FontSizeMode g_currentFontSize = FontSizeMode::Default;
+// 字体与画刷 (默认使用 Medium 中号字体)
+FontSizeMode g_currentFontSize = FontSizeMode::Medium;
 HFONT g_hFontNormal = nullptr;
 HFONT g_hFontBold = nullptr;
 HFONT g_hFontTitle = nullptr;
@@ -86,7 +85,6 @@ HBRUSH g_hBrushNavy = nullptr;
 HBRUSH g_hBrushCard = nullptr;
 
 std::vector<std::unique_ptr<ClientContext>> g_contexts;
-std::mutex g_contextMutex;
 int g_selectedIndex = -1;
 bool g_isUpdatingUi = false;
 
@@ -100,7 +98,7 @@ enum {
     ID_BTN_RESET_STATS,
     ID_BTN_TEST_ENTER,
     ID_EDIT_INTERVAL,
-    ID_BTN_FONT_DEFAULT,
+    ID_BTN_FONT_SMALL,
     ID_BTN_FONT_MEDIUM,
     ID_BTN_FONT_LARGE,
     ID_TIMER_UI = 2001,
@@ -117,14 +115,18 @@ std::wstring Utf8ToWide(const std::string& str) {
     return wstr;
 }
 
-// 动态创建并应用字体 (默认 15px / 中 18px / 大 21px)
+// 动态创建并应用字体：小 (15px) / 中 (默认 18px) / 大 (21px)
 void ApplyFontSize(FontSizeMode mode) {
     g_currentFontSize = mode;
-    int normalSize = 15;
-    int titleSize = 16;
-    int rowHeight = 24;
+    int normalSize = 18;
+    int titleSize = 19;
+    int rowHeight = 30;
 
-    if (mode == FontSizeMode::Medium) {
+    if (mode == FontSizeMode::Small) {
+        normalSize = 15;
+        titleSize = 16;
+        rowHeight = 24;
+    } else if (mode == FontSizeMode::Medium) {
         normalSize = 18;
         titleSize = 19;
         rowHeight = 30;
@@ -147,7 +149,7 @@ void ApplyFontSize(FontSizeMode mode) {
     g_hFontTitle = CreateFontW(titleSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-    // 动态调整 ListView 行高 (通过关联 ImageList 实现平滑行高放大)
+    // 动态调整 ListView 行高
     if (g_hListView) {
         if (g_hImageListRow) ImageList_Destroy(g_hImageListRow);
         g_hImageListRow = ImageList_Create(1, rowHeight, ILC_COLOR32, 1, 1);
@@ -172,23 +174,23 @@ void ApplyFontSize(FontSizeMode mode) {
     if (g_hIntervalSecLabel) SendMessageW(g_hIntervalSecLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
 
     if (g_hFontLabel) SendMessageW(g_hFontLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
-    if (g_hBtnFontDefault) SendMessageW(g_hBtnFontDefault, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Default ? g_hFontBold : g_hFontNormal), TRUE);
+    if (g_hBtnFontSmall) SendMessageW(g_hBtnFontSmall, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Small ? g_hFontBold : g_hFontNormal), TRUE);
     if (g_hBtnFontMedium) SendMessageW(g_hBtnFontMedium, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Medium ? g_hFontBold : g_hFontNormal), TRUE);
     if (g_hBtnFontLarge) SendMessageW(g_hBtnFontLarge, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Large ? g_hFontBold : g_hFontNormal), TRUE);
 
     // 重新调整列宽以容纳放大的字号
     if (g_hListView) {
-        int scaleRatio = (mode == FontSizeMode::Large) ? 130 : (mode == FontSizeMode::Medium) ? 115 : 100;
+        int scaleRatio = (mode == FontSizeMode::Large) ? 128 : (mode == FontSizeMode::Medium) ? 114 : 100;
         ListView_SetColumnWidth(g_hListView, 0, (55 * scaleRatio) / 100);
         ListView_SetColumnWidth(g_hListView, 1, (45 * scaleRatio) / 100);
         ListView_SetColumnWidth(g_hListView, 2, (65 * scaleRatio) / 100);
         ListView_SetColumnWidth(g_hListView, 3, (125 * scaleRatio) / 100);
         ListView_SetColumnWidth(g_hListView, 4, (45 * scaleRatio) / 100);
         ListView_SetColumnWidth(g_hListView, 5, (100 * scaleRatio) / 100);
-        ListView_SetColumnWidth(g_hListView, 6, (110 * scaleRatio) / 100);
-        ListView_SetColumnWidth(g_hListView, 7, (60 * scaleRatio) / 100);
-        ListView_SetColumnWidth(g_hListView, 8, (230 * scaleRatio) / 100);
-        ListView_SetColumnWidth(g_hListView, 9, (95 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 6, (115 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 7, (58 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 8, (220 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 9, (90 * scaleRatio) / 100);
     }
 
     if (g_hMainWnd) {
@@ -197,12 +199,11 @@ void ApplyFontSize(FontSizeMode mode) {
     }
 }
 
-// 扫描客户端 (严格精确匹配标题，最多8个)
+// 扫描客户端 (严格精确匹配标题，最多8个，无锁顺畅移除退出客户端)
 void ScanProcesses(bool forceAttach = false) {
     auto procs = WowProcessManager::FindWowProcesses();
-    std::lock_guard<std::mutex> lock(g_contextMutex);
 
-    // 移除已关闭的
+    // 移除已关闭的客户端（无阻塞秒级清理）
     for (auto it = g_contexts.begin(); it != g_contexts.end();) {
         bool stillRunning = false;
         for (const auto& p : procs) {
@@ -211,7 +212,7 @@ void ScanProcesses(bool forceAttach = false) {
                 break;
             }
         }
-        if (!stillRunning) {
+        if (!stillRunning || !(*it)->session->IsProcessAlive()) {
             (*it)->reconnectCtrl->Stop();
             (*it)->session->Detach();
             it = g_contexts.erase(it);
@@ -243,13 +244,16 @@ void ScanProcesses(bool forceAttach = false) {
             g_contexts.push_back(std::move(ctx));
         }
     }
+
+    if (g_selectedIndex >= (int)g_contexts.size()) {
+        g_selectedIndex = (int)g_contexts.size() - 1;
+    }
 }
 
 // 刷新 ListView 列表
 void RefreshListView() {
     if (!g_hListView) return;
     g_isUpdatingUi = true;
-    std::lock_guard<std::mutex> lock(g_contextMutex);
 
     int count = ListView_GetItemCount(g_hListView);
     int total = static_cast<int>(g_contexts.size());
@@ -308,10 +312,10 @@ void RefreshListView() {
         ListView_SetItemText(g_hListView, i, 6, (LPWSTR)recStatusStr.c_str());
 
         // 重连次数
-        std::wstring recCountStr = std::to_wstring(ctx->reconnectCtrl->reconnectCount.load());
+        std::wstring recCountStr = std::to_wstring(ctx->reconnectCtrl->reconnectCount);
         ListView_SetItemText(g_hListView, i, 7, (LPWSTR)recCountStr.c_str());
 
-        // 背包矿草摘要
+        // 矿石与背包空位摘要
         std::string bagSummary = ctx->tracker->GetInventorySummary();
         std::wstring bagWStr = Utf8ToWide(bagSummary);
         ListView_SetItemText(g_hListView, i, 8, (LPWSTR)bagWStr.c_str());
@@ -329,7 +333,7 @@ void RefreshListView() {
     std::wstringstream sbStatus;
     sbStatus << L" Firestorm TWW 极速C++版 | 客户端总数: " << total
              << L" | 监控中: " << monitoredCount
-             << L" | 全局总采集时速: " << std::fixed << std::setprecision(1) << totalRate << L"/h";
+             << L" | 全局采矿时速: " << std::fixed << std::setprecision(1) << totalRate << L"/h";
     SetWindowTextW(g_hStatusBar, sbStatus.str().c_str());
 
     // 更新选中项详情面板
@@ -337,25 +341,28 @@ void RefreshListView() {
         if (g_selectedIndex >= 0 && g_selectedIndex < total) {
             auto& sCtx = g_contexts[g_selectedIndex];
             std::wstringstream ssDet;
-            ssDet << L"选中客户端 [PID: " << sCtx->procInfo.pid << L"] "
-                  << (sCtx->playerName.empty() ? L"(待进游戏/未选角)" : Utf8ToWide(sCtx->playerName))
-                  << L"  | 状态: " << (sCtx->inWorld ? L"🟢 在线中" : L"🔴 待进游戏")
-                  << L"  | 重连次数: " << sCtx->reconnectCtrl->reconnectCount.load()
-                  << L"  | 采集时速: " << std::fixed << std::setprecision(1) << sCtx->tracker->GetTotalPerHour() << L"/h";
+            ssDet << L"选中 [PID:" << sCtx->procInfo.pid << L"] "
+                  << (sCtx->playerName.empty() ? L"(待进游戏)" : Utf8ToWide(sCtx->playerName))
+                  << L" | " << (sCtx->inWorld ? L"🟢在线" : L"🔴待进")
+                  << L" | 空位:" << sCtx->tracker->freeSlots
+                  << L" | 时速:" << std::fixed << std::setprecision(1) << sCtx->tracker->GetTotalPerHour() << L"/h";
             SetWindowTextW(g_hDetailLabel, ssDet.str().c_str());
         } else {
-            SetWindowTextW(g_hDetailLabel, L"请在上方列表点击选中一个魔兽客户端以查看详细监控信息");
+            SetWindowTextW(g_hDetailLabel, L"请在上方列表点击选中一个魔兽客户端以查看详情");
         }
     }
 
     g_isUpdatingUi = false;
 }
 
-// 内存读核心数据更新循环 (每秒)
+// 内存读与重连状态机更新循环 (每秒执行一次，全过程无阻塞 < 0.2ms)
 void UpdateTick() {
-    std::lock_guard<std::mutex> lock(g_contextMutex);
+    bool anyExited = false;
     for (auto& ctx : g_contexts) {
-        if (!ctx->session->IsAttached()) continue;
+        if (!ctx->session->IsAttached() || !ctx->session->IsProcessAlive()) {
+            anyExited = true;
+            continue;
+        }
 
         ctx->inWorld = ctx->session->CheckWorldState();
         if (ctx->inWorld) {
@@ -367,6 +374,16 @@ void UpdateTick() {
             ctx->playerName.clear();
             ctx->level = 0;
         }
+
+        // 驱动该客户端的重连状态机
+        if (ctx->isMonitored) {
+            ctx->reconnectCtrl->Tick(ctx->inWorld);
+        }
+    }
+
+    // 若检测到有客户端退出，立即清理列表，绝不向已关闭窗口发消息导致卡死
+    if (anyExited) {
+        ScanProcesses(false);
     }
 }
 
@@ -379,49 +396,49 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
             0, 0, 0, 0, hWnd, nullptr, g_hInstance, nullptr);
 
-        // 创建顶部现代海军蓝 Header 标题栏 (美化背景与文字)
+        // 创建顶部现代海军蓝 Header 标题栏
         g_hHeaderBanner = CreateWindowExW(0, L"STATIC",
             L"  FIRESTORM TWW MONITOR (C++ Native) · 极速微内核 · 极致低内存/CPU · 纯后台自动重连",
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-            12, 10, 836, 32, hWnd, nullptr, g_hInstance, nullptr);
+            12, 10, 916, 32, hWnd, nullptr, g_hInstance, nullptr);
 
-        // 创建扁平紧凑工具栏按钮 (高度 30，间距整齐)
-        int btnX = 12, btnY = 50, btnH = 30, gap = 8;
+        // 创建扁平紧凑工具栏按钮 (高度 32，间距整齐)
+        int btnX = 12, btnY = 50, btnH = 32, gap = 8;
         g_hBtnScan = CreateWindowExW(0, L"BUTTON", L"🔍 刷新客户端", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 108, btnH, hWnd, (HMENU)ID_BTN_SCAN, g_hInstance, nullptr);
-        btnX += 108 + gap;
+            btnX, btnY, 118, btnH, hWnd, (HMENU)ID_BTN_SCAN, g_hInstance, nullptr);
+        btnX += 118 + gap;
 
         g_hBtnRec = CreateWindowExW(0, L"BUTTON", L"🔄 立即重连", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-            btnX, btnY, 108, btnH, hWnd, (HMENU)ID_BTN_RECONNECT_NOW, g_hInstance, nullptr);
-        btnX += 108 + gap;
+            btnX, btnY, 115, btnH, hWnd, (HMENU)ID_BTN_RECONNECT_NOW, g_hInstance, nullptr);
+        btnX += 115 + gap;
 
         g_hBtnStartAll = CreateWindowExW(0, L"BUTTON", L"▶ 全部开启", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_START_ALL, g_hInstance, nullptr);
-        btnX += 102 + gap;
+            btnX, btnY, 112, btnH, hWnd, (HMENU)ID_BTN_START_ALL, g_hInstance, nullptr);
+        btnX += 112 + gap;
 
         g_hBtnStopAll = CreateWindowExW(0, L"BUTTON", L"⏹ 全部停止", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_STOP_ALL, g_hInstance, nullptr);
-        btnX += 102 + gap;
+            btnX, btnY, 112, btnH, hWnd, (HMENU)ID_BTN_STOP_ALL, g_hInstance, nullptr);
+        btnX += 112 + gap;
 
         g_hBtnClose = CreateWindowExW(0, L"BUTTON", L"❌ 关闭窗口", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_CLOSE_PROC, g_hInstance, nullptr);
-        btnX += 102 + gap;
+            btnX, btnY, 112, btnH, hWnd, (HMENU)ID_BTN_CLOSE_PROC, g_hInstance, nullptr);
+        btnX += 112 + gap;
 
         g_hBtnReset = CreateWindowExW(0, L"BUTTON", L"🔄 重置时速", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_RESET_STATS, g_hInstance, nullptr);
-        btnX += 102 + gap;
+            btnX, btnY, 112, btnH, hWnd, (HMENU)ID_BTN_RESET_STATS, g_hInstance, nullptr);
+        btnX += 112 + gap;
 
         g_hBtnTest = CreateWindowExW(0, L"BUTTON", L"↵ 后台回车", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_TEST_ENTER, g_hInstance, nullptr);
+            btnX, btnY, 112, btnH, hWnd, (HMENU)ID_BTN_TEST_ENTER, g_hInstance, nullptr);
 
-        // 创建多账号核心 ListView 表格 (高度适中，最多8个窗体舒适展示，绝无过长)
+        // 创建多账号核心 ListView 表格 (高度适中，最多8个窗体舒适展示)
         g_hListView = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL,
-            12, 90, 836, 260, hWnd, nullptr, g_hInstance, nullptr);
+            12, 92, 916, 265, hWnd, nullptr, g_hInstance, nullptr);
 
         ListView_SetExtendedListViewStyle(g_hListView, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
 
-        // 列标题
+        // 列标题 (第8列改为“矿石与空位”)
         LVCOLUMNW lvc = {0};
         lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
 
@@ -432,11 +449,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             { L"PID", 65 },
             { L"角色名称", 125 },
             { L"等级", 45 },
-            { L"在线状态", 95 },
-            { L"重连状态", 100 },
-            { L"重连次", 55 },
-            { L"矿草存量", 220 },
-            { L"采集时速", 90 }
+            { L"在线状态", 100 },
+            { L"重连状态", 115 },
+            { L"重连次", 58 },
+            { L"矿石与空位", 220 },
+            { L"采矿时速", 90 }
         };
 
         for (int i = 0; i < sizeof(cols)/sizeof(cols[0]); i++) {
@@ -447,35 +464,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         // 底部详情卡片 (左侧展示选中角色状态)
-        g_hDetailLabel = CreateWindowExW(0, L"STATIC", L"请在上方列表点击选中一个魔兽客户端以查看详细监控信息",
+        g_hDetailLabel = CreateWindowExW(0, L"STATIC", L"请在上方列表点击选中一个魔兽客户端以查看详情",
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-            12, 360, 430, 26, hWnd, nullptr, g_hInstance, nullptr);
+            12, 366, 480, 28, hWnd, nullptr, g_hInstance, nullptr);
 
         // 底部重试间隔输入 (支持自由修改，默认 10 秒)
         g_hIntervalLabel = CreateWindowExW(0, L"STATIC", L"重试间隔:", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
-            445, 360, 70, 26, hWnd, nullptr, g_hInstance, nullptr);
+            500, 366, 80, 28, hWnd, nullptr, g_hInstance, nullptr);
 
         g_hIntervalEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"10", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_CENTER,
-            518, 361, 38, 24, hWnd, (HMENU)ID_EDIT_INTERVAL, g_hInstance, nullptr);
+            584, 367, 42, 26, hWnd, (HMENU)ID_EDIT_INTERVAL, g_hInstance, nullptr);
 
         g_hIntervalSecLabel = CreateWindowExW(0, L"STATIC", L"秒", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-            560, 360, 24, 26, hWnd, nullptr, g_hInstance, nullptr);
+            630, 366, 26, 28, hWnd, nullptr, g_hInstance, nullptr);
 
-        // 底部字号切换控制：默认 / 中 / 大
+        // 底部字号切换控制：小 / 中(默认) / 大
         g_hFontLabel = CreateWindowExW(0, L"STATIC", L"字体:", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
-            588, 360, 42, 26, hWnd, nullptr, g_hInstance, nullptr);
+            660, 366, 48, 28, hWnd, nullptr, g_hInstance, nullptr);
 
-        g_hBtnFontDefault = CreateWindowExW(0, L"BUTTON", L"默认", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            634, 361, 46, 24, hWnd, (HMENU)ID_BTN_FONT_DEFAULT, g_hInstance, nullptr);
+        g_hBtnFontSmall = CreateWindowExW(0, L"BUTTON", L"小", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            712, 367, 44, 26, hWnd, (HMENU)ID_BTN_FONT_SMALL, g_hInstance, nullptr);
 
         g_hBtnFontMedium = CreateWindowExW(0, L"BUTTON", L"中", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            684, 361, 42, 24, hWnd, (HMENU)ID_BTN_FONT_MEDIUM, g_hInstance, nullptr);
+            760, 367, 44, 26, hWnd, (HMENU)ID_BTN_FONT_MEDIUM, g_hInstance, nullptr);
 
         g_hBtnFontLarge = CreateWindowExW(0, L"BUTTON", L"大", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            730, 361, 42, 24, hWnd, (HMENU)ID_BTN_FONT_LARGE, g_hInstance, nullptr);
+            808, 367, 44, 26, hWnd, (HMENU)ID_BTN_FONT_LARGE, g_hInstance, nullptr);
 
-        // 初始应用默认字体大小
-        ApplyFontSize(FontSizeMode::Default);
+        // 初始默认使用【中】号字体
+        ApplyFontSize(FontSizeMode::Medium);
 
         // 启动定时器
         SetTimer(hWnd, ID_TIMER_UI, 1000, nullptr);
@@ -483,6 +500,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         // 初始扫描
         ScanProcesses(true);
+        UpdateTick();
+        RefreshListView();
         return 0;
     }
 
@@ -497,24 +516,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         if (g_hHeaderBanner) SetWindowPos(g_hHeaderBanner, nullptr, 12, 10, w - 24, 32, SWP_NOZORDER);
 
-        int bottomY = h - sbH - 32;
-        if (g_hListView) SetWindowPos(g_hListView, nullptr, 12, 90, w - 24, bottomY - 96, SWP_NOZORDER);
+        int bottomY = h - sbH - 34;
+        if (g_hListView) SetWindowPos(g_hListView, nullptr, 12, 92, w - 24, bottomY - 98, SWP_NOZORDER);
 
         // 底部栏布局：左侧详情展示自适应拉伸，右侧固定间隔输入和字号切换
-        int rightBlockW = 345;
+        int rightBlockW = 365;
         int detailW = (std::max)(80, w - 24 - rightBlockW - 10);
-        if (g_hDetailLabel) SetWindowPos(g_hDetailLabel, nullptr, 12, bottomY, detailW, 26, SWP_NOZORDER);
+        if (g_hDetailLabel) SetWindowPos(g_hDetailLabel, nullptr, 12, bottomY, detailW, 28, SWP_NOZORDER);
 
         int rx = 12 + detailW + 10;
-        if (g_hIntervalLabel) SetWindowPos(g_hIntervalLabel, nullptr, rx, bottomY, 70, 26, SWP_NOZORDER);
-        if (g_hIntervalEdit) SetWindowPos(g_hIntervalEdit, nullptr, rx + 73, bottomY + 1, 38, 24, SWP_NOZORDER);
-        if (g_hIntervalSecLabel) SetWindowPos(g_hIntervalSecLabel, nullptr, rx + 115, bottomY, 24, 26, SWP_NOZORDER);
+        if (g_hIntervalLabel) SetWindowPos(g_hIntervalLabel, nullptr, rx, bottomY, 80, 28, SWP_NOZORDER);
+        if (g_hIntervalEdit) SetWindowPos(g_hIntervalEdit, nullptr, rx + 84, bottomY + 1, 42, 26, SWP_NOZORDER);
+        if (g_hIntervalSecLabel) SetWindowPos(g_hIntervalSecLabel, nullptr, rx + 130, bottomY, 26, 28, SWP_NOZORDER);
 
-        int fx = rx + 145;
-        if (g_hFontLabel) SetWindowPos(g_hFontLabel, nullptr, fx, bottomY, 42, 26, SWP_NOZORDER);
-        if (g_hBtnFontDefault) SetWindowPos(g_hBtnFontDefault, nullptr, fx + 46, bottomY + 1, 46, 24, SWP_NOZORDER);
-        if (g_hBtnFontMedium) SetWindowPos(g_hBtnFontMedium, nullptr, fx + 96, bottomY + 1, 42, 24, SWP_NOZORDER);
-        if (g_hBtnFontLarge) SetWindowPos(g_hBtnFontLarge, nullptr, fx + 142, bottomY + 1, 42, 24, SWP_NOZORDER);
+        int fx = rx + 160;
+        if (g_hFontLabel) SetWindowPos(g_hFontLabel, nullptr, fx, bottomY, 48, 28, SWP_NOZORDER);
+        if (g_hBtnFontSmall) SetWindowPos(g_hBtnFontSmall, nullptr, fx + 52, bottomY + 1, 44, 26, SWP_NOZORDER);
+        if (g_hBtnFontMedium) SetWindowPos(g_hBtnFontMedium, nullptr, fx + 100, bottomY + 1, 44, 26, SWP_NOZORDER);
+        if (g_hBtnFontLarge) SetWindowPos(g_hBtnFontLarge, nullptr, fx + 148, bottomY + 1, 44, 26, SWP_NOZORDER);
 
         break;
     }
@@ -556,7 +575,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int val = _wtoi(buf);
             if (val >= 1 && val <= 300) {
                 g_globalRetryInterval = val;
-                std::lock_guard<std::mutex> lock(g_contextMutex);
                 for (auto& ctx : g_contexts) {
                     ctx->reconnectCtrl->stepIntervalSeconds = val;
                 }
@@ -565,8 +583,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         switch (id) {
-        case ID_BTN_FONT_DEFAULT:
-            ApplyFontSize(FontSizeMode::Default);
+        case ID_BTN_FONT_SMALL:
+            ApplyFontSize(FontSizeMode::Small);
             break;
         case ID_BTN_FONT_MEDIUM:
             ApplyFontSize(FontSizeMode::Medium);
@@ -577,32 +595,34 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case ID_BTN_SCAN:
             ScanProcesses(false);
+            UpdateTick();
             RefreshListView();
             break;
 
         case ID_BTN_RECONNECT_NOW: {
-            std::lock_guard<std::mutex> lock(g_contextMutex);
             if (g_selectedIndex >= 0 && g_selectedIndex < (int)g_contexts.size()) {
+                g_contexts[g_selectedIndex]->isMonitored = true;
                 g_contexts[g_selectedIndex]->reconnectCtrl->TriggerImmediateReconnect();
             } else if (!g_contexts.empty()) {
+                g_contexts[0]->isMonitored = true;
                 g_contexts[0]->reconnectCtrl->TriggerImmediateReconnect();
             }
+            RefreshListView();
             break;
         }
 
         case ID_BTN_START_ALL: {
-            std::lock_guard<std::mutex> lock(g_contextMutex);
             for (auto& ctx : g_contexts) {
                 ctx->isMonitored = true;
                 ctx->reconnectCtrl->Start();
                 ctx->tracker->Start();
+                ctx->reconnectCtrl->Tick(ctx->inWorld);
             }
             RefreshListView();
             break;
         }
 
         case ID_BTN_STOP_ALL: {
-            std::lock_guard<std::mutex> lock(g_contextMutex);
             for (auto& ctx : g_contexts) {
                 ctx->isMonitored = false;
                 ctx->reconnectCtrl->Stop();
@@ -612,26 +632,27 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case ID_BTN_CLOSE_PROC: {
-            std::lock_guard<std::mutex> lock(g_contextMutex);
             if (g_selectedIndex >= 0 && g_selectedIndex < (int)g_contexts.size()) {
                 auto& ctx = g_contexts[g_selectedIndex];
+                ctx->reconnectCtrl->Stop();
                 if (ctx->session->processHandle) {
                     TerminateProcess(ctx->session->processHandle, 0);
                 }
+                ScanProcesses(false);
+                RefreshListView();
             }
             break;
         }
 
         case ID_BTN_RESET_STATS: {
-            std::lock_guard<std::mutex> lock(g_contextMutex);
             for (auto& ctx : g_contexts) {
                 ctx->tracker->Reset();
             }
+            RefreshListView();
             break;
         }
 
         case ID_BTN_TEST_ENTER: {
-            std::lock_guard<std::mutex> lock(g_contextMutex);
             HWND targetHwnd = nullptr;
             if (g_selectedIndex >= 0 && g_selectedIndex < (int)g_contexts.size()) {
                 targetHwnd = g_contexts[g_selectedIndex]->session->GetOrRefreshWindowHandle();
@@ -639,7 +660,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 targetHwnd = g_contexts[0]->session->GetOrRefreshWindowHandle();
             }
             if (targetHwnd) {
-                BackgroundInput::SendReconnectAction(targetHwnd);
+                BackgroundInput::SendReconnectActionAsync(targetHwnd);
             }
             break;
         }
@@ -658,20 +679,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         g_selectedIndex = pnmv->iItem;
                         RefreshListView();
                     }
-                    // 处理勾选框改变
+                    // 处理勾选框改变 (无锁非阻塞切换，绝不卡死)
                     bool oldCheck = (pnmv->uOldState >> 12) == 2;
                     bool newCheck = (pnmv->uNewState >> 12) == 2;
                     if (oldCheck != newCheck && pnmv->iItem >= 0) {
-                        std::lock_guard<std::mutex> lock(g_contextMutex);
                         if (pnmv->iItem < (int)g_contexts.size()) {
                             auto& ctx = g_contexts[pnmv->iItem];
                             ctx->isMonitored = newCheck;
                             if (newCheck) {
                                 ctx->reconnectCtrl->Start();
                                 ctx->tracker->Start();
+                                ctx->reconnectCtrl->Tick(ctx->inWorld);
                             } else {
                                 ctx->reconnectCtrl->Stop();
                             }
+                            RefreshListView();
                         }
                     }
                 }
@@ -728,11 +750,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     if (!RegisterClassExW(&wc)) return 1;
 
-    // 创建主窗口 (紧凑美化尺寸 870x470，针对最多8个窗体深度优化)
+    // 创建主窗口 (紧凑美化尺寸 950x490，完美适配默认中号字体与最多8个窗体)
     g_hMainWnd = CreateWindowExW(0, wc.lpszClassName,
         L"Firestorm TWW 窗口监控器 · 极速C++版 (内存<6MB · CPU<0.05%)",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 870, 470,
+        CW_USEDEFAULT, CW_USEDEFAULT, 950, 490,
         nullptr, nullptr, hInstance, nullptr);
 
     if (!g_hMainWnd) return 2;

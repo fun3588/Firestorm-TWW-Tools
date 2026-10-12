@@ -1,9 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <string>
-#include <thread>
 #include <atomic>
-#include <functional>
 #include <chrono>
 #include "WowMemorySession.h"
 #include "BackgroundInput.h"
@@ -14,163 +12,108 @@ enum class ReconnectState {
     WaitingForWorldLoad
 };
 
+// 纯单线程状态机重连控制器（零死锁、零阻塞、零线程竞争）
 class ReconnectController {
 private:
     WowMemorySession* session = nullptr;
-    std::thread workerThread;
-    std::atomic<bool> isRunning{false};
+    bool isRunning = false;
+    std::chrono::steady_clock::time_point lastActionTime;
+    bool hasSentFirstAction = false;
 
 public:
-    std::atomic<bool> autoReconnectEnabled{true};
+    bool autoReconnectEnabled = true;
     int stepIntervalSeconds = 10; // 默认 10 秒自动重试
-    std::atomic<int> reconnectCount{0};
-    std::atomic<int> currentRetryAttempts{0};
+    int reconnectCount = 0;
+    int currentRetryAttempts = 0;
     ReconnectState currentState = ReconnectState::InWorld;
-    std::string statusDescription = "就绪";
-
-    std::function<void(const std::string&)> onLogCallback;
-    std::function<void(const std::string&)> onStatusCallback;
+    std::string statusDescription = "已停止监控";
 
     ReconnectController(WowMemorySession* s = nullptr) : session(s) {}
 
-    ~ReconnectController() {
-        Stop();
-    }
+    ~ReconnectController() = default;
 
     void SetSession(WowMemorySession* s) {
         session = s;
     }
 
     void Start() {
-        Stop();
         if (!session) return;
         isRunning = true;
-        workerThread = std::thread(&ReconnectController::MonitorLoop, this);
-        Log("重连控制器已启动 (默认 " + std::to_string(stepIntervalSeconds) + " 秒自动重试机制)");
+        autoReconnectEnabled = true;
+        hasSentFirstAction = false;
+        statusDescription = "监控就绪";
     }
 
     void Stop() {
         isRunning = false;
-        if (workerThread.joinable()) {
-            workerThread.join();
-        }
         currentRetryAttempts = 0;
-        SetStatus("已停止监控");
+        hasSentFirstAction = false;
+        statusDescription = "已停止监控";
     }
 
-    // 立即手动触发重连（绝不等待，立即发送回车并进入4秒循环）
+    // 立即手动触发重连（不等待间隔，立即在后台异步发送一次回车并启动监控）
     void TriggerImmediateReconnect() {
         if (!session) return;
+        isRunning = true;
         autoReconnectEnabled = true;
         currentRetryAttempts++;
+        hasSentFirstAction = true;
+        lastActionTime = std::chrono::steady_clock::now();
 
         HWND hWnd = session->GetOrRefreshWindowHandle();
         if (hWnd && IsWindow(hWnd)) {
-            Log("[立即重连] 手动触发：立即发送后台回车进游戏 (第 " + std::to_string(currentRetryAttempts) + " 次)...");
-            ExecuteSendEnter(hWnd);
+            statusDescription = "重连中 (第" + std::to_string(currentRetryAttempts) + "次, 间隔" + std::to_string(stepIntervalSeconds) + "s)";
+            BackgroundInput::SendReconnectActionAsync(hWnd, 0.50, 0.92);
         } else {
-            Log("[立即重连] 警告: 尚未找到有效游戏窗口句柄 (GxWindowClass)");
-        }
-
-        if (!isRunning) {
-            Start();
+            statusDescription = "窗口未就绪";
         }
     }
 
-private:
-    void MonitorLoop() {
-        while (isRunning) {
-            try {
-                if (!session || !session->IsAttached()) {
-                    SetStatus("未连接进程");
-                    SleepMs(1000);
-                    continue;
-                }
+    // 每秒由主定时器调用一次，绝不阻塞 GUI，耗时 < 0.05ms
+    void Tick(bool inWorld) {
+        if (!isRunning || !autoReconnectEnabled) {
+            statusDescription = "已停止监控";
+            return;
+        }
 
-                bool inWorld = session->CheckWorldState();
-                if (inWorld) {
-                    currentRetryAttempts = 0;
-                    if (currentState != ReconnectState::InWorld || statusDescription != "运行中") {
-                        currentState = ReconnectState::InWorld;
-                        SetStatus("运行中");
-                    }
-                    SleepMs(1000);
-                    continue;
-                }
+        if (!session || !session->IsAttached() || !session->IsProcessAlive()) {
+            statusDescription = "客户端已退出";
+            return;
+        }
 
-                // 未在世界中（选角界面/待进游戏）
-                if (!autoReconnectEnabled) {
-                    SetStatus("重连未开启");
-                    SleepMs(1000);
-                    continue;
-                }
-
-                HWND hWnd = session->GetOrRefreshWindowHandle();
-                if (!hWnd || !IsWindow(hWnd)) {
-                    SetStatus("窗口未就绪");
-                    Log("未找到游戏窗口句柄 (GxWindowClass)，稍后重试...");
-                    SleepMs(1000);
-                    continue;
-                }
-
-                currentRetryAttempts++;
-                currentState = ReconnectState::Step3_EnterWorld;
-                SetStatus("重连中 (第" + std::to_string(currentRetryAttempts) + "次, 每" + std::to_string(stepIntervalSeconds) + "s重试)...");
-                Log("[未在线·待进游戏·PID " + std::to_string(session->processId) + "] 自动发送后台回车进游戏 (第 " + std::to_string(currentRetryAttempts) + " 次重试)...");
-
-                ExecuteSendEnter(hWnd);
-
-                // 循环间隔等待（默认4秒），期间高频检测是否已进游戏
-                int checkIntervalMs = 500;
-                int maxChecks = (std::max)(1, (stepIntervalSeconds * 1000) / checkIntervalMs);
-                for (int i = 0; i < maxChecks && isRunning; i++) {
-                    SleepMs(checkIntervalMs);
-                    if (session->CheckWorldState()) {
-                        CompleteReconnect();
-                        break;
-                    }
-                }
+        if (inWorld) {
+            if (currentRetryAttempts > 0) {
+                reconnectCount++;
+                currentRetryAttempts = 0;
+                hasSentFirstAction = false;
             }
-            catch (...) {
-                SleepMs(1000);
-            }
+            currentState = ReconnectState::InWorld;
+            statusDescription = "运行中";
+            return;
         }
-    }
 
-    void ExecuteSendEnter(HWND hWnd) {
-        if (!hWnd) return;
-        // 纯后台双保险：WM_ACTIVATE + 回车 + 选角界面底部 (50%, 92%) 点击
-        BackgroundInput::SendReconnectAction(hWnd, 0.50, 0.92);
-    }
-
-    void CompleteReconnect() {
-        reconnectCount++;
-        currentRetryAttempts = 0;
-        currentState = ReconnectState::InWorld;
-        SetStatus("运行中");
-        Log("重连并进入游戏成功！累计重连次数: " + std::to_string(reconnectCount));
-    }
-
-    void SleepMs(int ms) {
-        int elapsed = 0;
-        while (elapsed < ms && isRunning) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            elapsed += 50;
+        // 未在世界中（选角界面 / 待进游戏）
+        HWND hWnd = session->GetOrRefreshWindowHandle();
+        if (!hWnd || !IsWindow(hWnd)) {
+            statusDescription = "窗口未就绪";
+            return;
         }
-    }
 
-    void SetStatus(const std::string& st) {
-        statusDescription = st;
-        if (onStatusCallback) onStatusCallback(st);
-    }
+        auto now = std::chrono::steady_clock::now();
+        double elapsedSec = std::chrono::duration<double>(now - lastActionTime).count();
 
-    void Log(const std::string& msg) {
-        if (onLogCallback) {
-            SYSTEMTIME st;
-            GetLocalTime(&st);
-            char timeBuf[32];
-            snprintf(timeBuf, sizeof(timeBuf), "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
-            onLogCallback(std::string(timeBuf) + msg);
+        if (!hasSentFirstAction || elapsedSec >= static_cast<double>(stepIntervalSeconds)) {
+            hasSentFirstAction = true;
+            lastActionTime = now;
+            currentRetryAttempts++;
+            currentState = ReconnectState::Step3_EnterWorld;
+            statusDescription = "重连中 (第" + std::to_string(currentRetryAttempts) + "次, 间隔" + std::to_string(stepIntervalSeconds) + "s)";
+
+            // 异步非阻塞发送后台双保险回车+点击
+            BackgroundInput::SendReconnectActionAsync(hWnd, 0.50, 0.92);
+        } else {
+            int remainSec = (std::max)(1, stepIntervalSeconds - static_cast<int>(elapsedSec));
+            statusDescription = "等待进游戏 (" + std::to_string(remainSec) + "s后第" + std::to_string(currentRetryAttempts + 1) + "次重试)";
         }
     }
 };
