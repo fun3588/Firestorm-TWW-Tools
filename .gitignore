@@ -27,3 +27,6 @@ $RECYCLE.BIN/
 *.tmp
 *.temp
 *.log
+
+# C++ Build results
+build_cpp/
