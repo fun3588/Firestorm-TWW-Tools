@@ -39,6 +39,13 @@ struct ClientContext {
     }
 };
 
+// 字体大小模式枚举
+enum class FontSizeMode {
+    Default = 0, // 默认 (15px)
+    Medium  = 1, // 中 (18px)
+    Large   = 2  // 大 (21px)
+};
+
 // 全局句柄与变量
 HINSTANCE g_hInstance = nullptr;
 HWND g_hMainWnd = nullptr;
@@ -47,16 +54,33 @@ HWND g_hStatusBar = nullptr;
 HWND g_hHeaderBanner = nullptr;
 HWND g_hDetailLabel = nullptr;
 
-// 底部间隔设置控件
+// 顶部按钮句柄
+HWND g_hBtnScan = nullptr;
+HWND g_hBtnRec = nullptr;
+HWND g_hBtnStartAll = nullptr;
+HWND g_hBtnStopAll = nullptr;
+HWND g_hBtnClose = nullptr;
+HWND g_hBtnReset = nullptr;
+HWND g_hBtnTest = nullptr;
+
+// 底部间隔设置与字号切换控件
 int g_globalRetryInterval = 10; // 默认 10 秒
 HWND g_hIntervalLabel = nullptr;
 HWND g_hIntervalEdit = nullptr;
 HWND g_hIntervalSecLabel = nullptr;
 
-// 字体与画刷 (现代 UI 配色: Navy #0F172A, Slate #F1F5F9)
+HWND g_hFontLabel = nullptr;
+HWND g_hBtnFontDefault = nullptr;
+HWND g_hBtnFontMedium = nullptr;
+HWND g_hBtnFontLarge = nullptr;
+
+// 字体与画刷
+FontSizeMode g_currentFontSize = FontSizeMode::Default;
 HFONT g_hFontNormal = nullptr;
 HFONT g_hFontBold = nullptr;
 HFONT g_hFontTitle = nullptr;
+HIMAGELIST g_hImageListRow = nullptr;
+
 HBRUSH g_hBrushBg = nullptr;
 HBRUSH g_hBrushNavy = nullptr;
 HBRUSH g_hBrushCard = nullptr;
@@ -76,6 +100,9 @@ enum {
     ID_BTN_RESET_STATS,
     ID_BTN_TEST_ENTER,
     ID_EDIT_INTERVAL,
+    ID_BTN_FONT_DEFAULT,
+    ID_BTN_FONT_MEDIUM,
+    ID_BTN_FONT_LARGE,
     ID_TIMER_UI = 2001,
     ID_TIMER_SCAN = 2002
 };
@@ -88,6 +115,86 @@ std::wstring Utf8ToWide(const std::string& str) {
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], size);
     if (!wstr.empty() && wstr.back() == L'\0') wstr.pop_back();
     return wstr;
+}
+
+// 动态创建并应用字体 (默认 15px / 中 18px / 大 21px)
+void ApplyFontSize(FontSizeMode mode) {
+    g_currentFontSize = mode;
+    int normalSize = 15;
+    int titleSize = 16;
+    int rowHeight = 24;
+
+    if (mode == FontSizeMode::Medium) {
+        normalSize = 18;
+        titleSize = 19;
+        rowHeight = 30;
+    } else if (mode == FontSizeMode::Large) {
+        normalSize = 21;
+        titleSize = 22;
+        rowHeight = 36;
+    }
+
+    // 删除旧字体
+    if (g_hFontNormal) DeleteObject(g_hFontNormal);
+    if (g_hFontBold) DeleteObject(g_hFontBold);
+    if (g_hFontTitle) DeleteObject(g_hFontTitle);
+
+    // 创建新字体
+    g_hFontNormal = CreateFontW(normalSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+    g_hFontBold = CreateFontW(normalSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+    g_hFontTitle = CreateFontW(titleSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+
+    // 动态调整 ListView 行高 (通过关联 ImageList 实现平滑行高放大)
+    if (g_hListView) {
+        if (g_hImageListRow) ImageList_Destroy(g_hImageListRow);
+        g_hImageListRow = ImageList_Create(1, rowHeight, ILC_COLOR32, 1, 1);
+        ListView_SetImageList(g_hListView, g_hImageListRow, LVSIL_SMALL);
+        SendMessageW(g_hListView, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    }
+
+    // 应用到各个控件
+    if (g_hHeaderBanner) SendMessageW(g_hHeaderBanner, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
+    if (g_hDetailLabel) SendMessageW(g_hDetailLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    if (g_hBtnScan) SendMessageW(g_hBtnScan, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hBtnRec) SendMessageW(g_hBtnRec, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
+    if (g_hBtnStartAll) SendMessageW(g_hBtnStartAll, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hBtnStopAll) SendMessageW(g_hBtnStopAll, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hBtnClose) SendMessageW(g_hBtnClose, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hBtnReset) SendMessageW(g_hBtnReset, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hBtnTest) SendMessageW(g_hBtnTest, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    if (g_hIntervalLabel) SendMessageW(g_hIntervalLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hIntervalEdit) SendMessageW(g_hIntervalEdit, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
+    if (g_hIntervalSecLabel) SendMessageW(g_hIntervalSecLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    if (g_hFontLabel) SendMessageW(g_hFontLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    if (g_hBtnFontDefault) SendMessageW(g_hBtnFontDefault, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Default ? g_hFontBold : g_hFontNormal), TRUE);
+    if (g_hBtnFontMedium) SendMessageW(g_hBtnFontMedium, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Medium ? g_hFontBold : g_hFontNormal), TRUE);
+    if (g_hBtnFontLarge) SendMessageW(g_hBtnFontLarge, WM_SETFONT, (WPARAM)(mode == FontSizeMode::Large ? g_hFontBold : g_hFontNormal), TRUE);
+
+    // 重新调整列宽以容纳放大的字号
+    if (g_hListView) {
+        int scaleRatio = (mode == FontSizeMode::Large) ? 130 : (mode == FontSizeMode::Medium) ? 115 : 100;
+        ListView_SetColumnWidth(g_hListView, 0, (55 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 1, (45 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 2, (65 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 3, (125 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 4, (45 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 5, (100 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 6, (110 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 7, (60 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 8, (230 * scaleRatio) / 100);
+        ListView_SetColumnWidth(g_hListView, 9, (95 * scaleRatio) / 100);
+    }
+
+    if (g_hMainWnd) {
+        InvalidateRect(g_hMainWnd, nullptr, TRUE);
+        UpdateWindow(g_hMainWnd);
+    }
 }
 
 // 扫描客户端 (严格精确匹配标题，最多8个)
@@ -277,51 +384,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             L"  FIRESTORM TWW MONITOR (C++ Native) · 极速微内核 · 极致低内存/CPU · 纯后台自动重连",
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
             12, 10, 836, 32, hWnd, nullptr, g_hInstance, nullptr);
-        SendMessageW(g_hHeaderBanner, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
 
         // 创建扁平紧凑工具栏按钮 (高度 30，间距整齐)
         int btnX = 12, btnY = 50, btnH = 30, gap = 8;
-        HWND hBtnScan = CreateWindowExW(0, L"BUTTON", L"🔍 刷新客户端", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_hBtnScan = CreateWindowExW(0, L"BUTTON", L"🔍 刷新客户端", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             btnX, btnY, 108, btnH, hWnd, (HMENU)ID_BTN_SCAN, g_hInstance, nullptr);
         btnX += 108 + gap;
 
-        HWND hBtnRec = CreateWindowExW(0, L"BUTTON", L"🔄 立即重连", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+        g_hBtnRec = CreateWindowExW(0, L"BUTTON", L"🔄 立即重连", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
             btnX, btnY, 108, btnH, hWnd, (HMENU)ID_BTN_RECONNECT_NOW, g_hInstance, nullptr);
         btnX += 108 + gap;
 
-        HWND hBtnStartAll = CreateWindowExW(0, L"BUTTON", L"▶ 全部开启", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_hBtnStartAll = CreateWindowExW(0, L"BUTTON", L"▶ 全部开启", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_START_ALL, g_hInstance, nullptr);
         btnX += 102 + gap;
 
-        HWND hBtnStopAll = CreateWindowExW(0, L"BUTTON", L"⏹ 全部停止", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_hBtnStopAll = CreateWindowExW(0, L"BUTTON", L"⏹ 全部停止", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_STOP_ALL, g_hInstance, nullptr);
         btnX += 102 + gap;
 
-        HWND hBtnClose = CreateWindowExW(0, L"BUTTON", L"❌ 关闭窗口", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_hBtnClose = CreateWindowExW(0, L"BUTTON", L"❌ 关闭窗口", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_CLOSE_PROC, g_hInstance, nullptr);
         btnX += 102 + gap;
 
-        HWND hBtnReset = CreateWindowExW(0, L"BUTTON", L"🔄 重置时速", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_hBtnReset = CreateWindowExW(0, L"BUTTON", L"🔄 重置时速", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_RESET_STATS, g_hInstance, nullptr);
         btnX += 102 + gap;
 
-        HWND hBtnTest = CreateWindowExW(0, L"BUTTON", L"↵ 后台回车", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_hBtnTest = CreateWindowExW(0, L"BUTTON", L"↵ 后台回车", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             btnX, btnY, 102, btnH, hWnd, (HMENU)ID_BTN_TEST_ENTER, g_hInstance, nullptr);
-
-        SendMessageW(hBtnScan, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
-        SendMessageW(hBtnRec, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
-        SendMessageW(hBtnStartAll, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
-        SendMessageW(hBtnStopAll, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
-        SendMessageW(hBtnClose, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
-        SendMessageW(hBtnReset, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
-        SendMessageW(hBtnTest, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
 
         // 创建多账号核心 ListView 表格 (高度适中，最多8个窗体舒适展示，绝无过长)
         g_hListView = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL,
             12, 90, 836, 260, hWnd, nullptr, g_hInstance, nullptr);
 
-        SendMessageW(g_hListView, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
         ListView_SetExtendedListViewStyle(g_hListView, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
 
         // 列标题
@@ -349,24 +446,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             ListView_InsertColumn(g_hListView, i, &lvc);
         }
 
-        // 底部详情卡片 (左侧展示选中角色状态，右侧展示重试间隔设置)
+        // 底部详情卡片 (左侧展示选中角色状态)
         g_hDetailLabel = CreateWindowExW(0, L"STATIC", L"请在上方列表点击选中一个魔兽客户端以查看详细监控信息",
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-            12, 360, 560, 26, hWnd, nullptr, g_hInstance, nullptr);
-        SendMessageW(g_hDetailLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+            12, 360, 430, 26, hWnd, nullptr, g_hInstance, nullptr);
 
-        // 底部重试间隔输入 (放到右下角卡片区域，支持自由修改，默认 10 秒)
+        // 底部重试间隔输入 (支持自由修改，默认 10 秒)
         g_hIntervalLabel = CreateWindowExW(0, L"STATIC", L"重试间隔:", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
-            580, 360, 75, 26, hWnd, nullptr, g_hInstance, nullptr);
-        SendMessageW(g_hIntervalLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+            445, 360, 70, 26, hWnd, nullptr, g_hInstance, nullptr);
 
         g_hIntervalEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"10", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_CENTER,
-            660, 361, 40, 24, hWnd, (HMENU)ID_EDIT_INTERVAL, g_hInstance, nullptr);
-        SendMessageW(g_hIntervalEdit, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
+            518, 361, 38, 24, hWnd, (HMENU)ID_EDIT_INTERVAL, g_hInstance, nullptr);
 
-        g_hIntervalSecLabel = CreateWindowExW(0, L"STATIC", L"秒 (默认10s)", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-            706, 360, 110, 26, hWnd, nullptr, g_hInstance, nullptr);
-        SendMessageW(g_hIntervalSecLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+        g_hIntervalSecLabel = CreateWindowExW(0, L"STATIC", L"秒", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+            560, 360, 24, 26, hWnd, nullptr, g_hInstance, nullptr);
+
+        // 底部字号切换控制：默认 / 中 / 大
+        g_hFontLabel = CreateWindowExW(0, L"STATIC", L"字体:", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
+            588, 360, 42, 26, hWnd, nullptr, g_hInstance, nullptr);
+
+        g_hBtnFontDefault = CreateWindowExW(0, L"BUTTON", L"默认", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            634, 361, 46, 24, hWnd, (HMENU)ID_BTN_FONT_DEFAULT, g_hInstance, nullptr);
+
+        g_hBtnFontMedium = CreateWindowExW(0, L"BUTTON", L"中", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            684, 361, 42, 24, hWnd, (HMENU)ID_BTN_FONT_MEDIUM, g_hInstance, nullptr);
+
+        g_hBtnFontLarge = CreateWindowExW(0, L"BUTTON", L"大", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            730, 361, 42, 24, hWnd, (HMENU)ID_BTN_FONT_LARGE, g_hInstance, nullptr);
+
+        // 初始应用默认字体大小
+        ApplyFontSize(FontSizeMode::Default);
 
         // 启动定时器
         SetTimer(hWnd, ID_TIMER_UI, 1000, nullptr);
@@ -386,21 +495,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         GetWindowRect(g_hStatusBar, &rcSb);
         int sbH = rcSb.bottom - rcSb.top;
 
-        // 动态自适应伸缩布局
         if (g_hHeaderBanner) SetWindowPos(g_hHeaderBanner, nullptr, 12, 10, w - 24, 32, SWP_NOZORDER);
 
         int bottomY = h - sbH - 32;
         if (g_hListView) SetWindowPos(g_hListView, nullptr, 12, 90, w - 24, bottomY - 96, SWP_NOZORDER);
 
-        // 底部栏：左侧详情文本自适应宽度，右侧锁定重试间隔控件
-        int rightControlsW = 230;
-        int detailW = (std::max)(100, w - 24 - rightControlsW - 10);
+        // 底部栏布局：左侧详情展示自适应拉伸，右侧固定间隔输入和字号切换
+        int rightBlockW = 345;
+        int detailW = (std::max)(80, w - 24 - rightBlockW - 10);
         if (g_hDetailLabel) SetWindowPos(g_hDetailLabel, nullptr, 12, bottomY, detailW, 26, SWP_NOZORDER);
 
-        int rightX = 12 + detailW + 10;
-        if (g_hIntervalLabel) SetWindowPos(g_hIntervalLabel, nullptr, rightX, bottomY, 75, 26, SWP_NOZORDER);
-        if (g_hIntervalEdit) SetWindowPos(g_hIntervalEdit, nullptr, rightX + 78, bottomY + 1, 40, 24, SWP_NOZORDER);
-        if (g_hIntervalSecLabel) SetWindowPos(g_hIntervalSecLabel, nullptr, rightX + 122, bottomY, 100, 26, SWP_NOZORDER);
+        int rx = 12 + detailW + 10;
+        if (g_hIntervalLabel) SetWindowPos(g_hIntervalLabel, nullptr, rx, bottomY, 70, 26, SWP_NOZORDER);
+        if (g_hIntervalEdit) SetWindowPos(g_hIntervalEdit, nullptr, rx + 73, bottomY + 1, 38, 24, SWP_NOZORDER);
+        if (g_hIntervalSecLabel) SetWindowPos(g_hIntervalSecLabel, nullptr, rx + 115, bottomY, 24, 26, SWP_NOZORDER);
+
+        int fx = rx + 145;
+        if (g_hFontLabel) SetWindowPos(g_hFontLabel, nullptr, fx, bottomY, 42, 26, SWP_NOZORDER);
+        if (g_hBtnFontDefault) SetWindowPos(g_hBtnFontDefault, nullptr, fx + 46, bottomY + 1, 46, 24, SWP_NOZORDER);
+        if (g_hBtnFontMedium) SetWindowPos(g_hBtnFontMedium, nullptr, fx + 96, bottomY + 1, 42, 24, SWP_NOZORDER);
+        if (g_hBtnFontLarge) SetWindowPos(g_hBtnFontLarge, nullptr, fx + 142, bottomY + 1, 42, 24, SWP_NOZORDER);
 
         break;
     }
@@ -421,7 +535,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return (LRESULT)g_hBrushBg;
         }
 
-        if (hwndStatic == g_hIntervalLabel || hwndStatic == g_hIntervalSecLabel) {
+        if (hwndStatic == g_hIntervalLabel || hwndStatic == g_hIntervalSecLabel || hwndStatic == g_hFontLabel) {
             SetTextColor(hdcStatic, RGB(71, 85, 105)); // Slate 600
             SetBkColor(hdcStatic, RGB(241, 245, 249));
             return (LRESULT)g_hBrushBg;
@@ -451,6 +565,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         switch (id) {
+        case ID_BTN_FONT_DEFAULT:
+            ApplyFontSize(FontSizeMode::Default);
+            break;
+        case ID_BTN_FONT_MEDIUM:
+            ApplyFontSize(FontSizeMode::Medium);
+            break;
+        case ID_BTN_FONT_LARGE:
+            ApplyFontSize(FontSizeMode::Large);
+            break;
+
         case ID_BTN_SCAN:
             ScanProcesses(false);
             RefreshListView();
@@ -587,14 +711,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     icex.dwICC = ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES;
     InitCommonControlsEx(&icex);
 
-    // 创建字体
-    g_hFontNormal = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
-    g_hFontBold = CreateFontW(15, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
-    g_hFontTitle = CreateFontW(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-
     // 创建画刷
     g_hBrushBg = CreateSolidBrush(RGB(241, 245, 249));  // Slate 100 窗口浅灰底色
     g_hBrushNavy = CreateSolidBrush(RGB(15, 23, 42));    // Slate 900 海军蓝顶部
@@ -612,11 +728,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     if (!RegisterClassExW(&wc)) return 1;
 
-    // 创建主窗口 (紧凑美化尺寸 860x460，针对最多8个窗体深度优化，不过长)
+    // 创建主窗口 (紧凑美化尺寸 870x470，针对最多8个窗体深度优化)
     g_hMainWnd = CreateWindowExW(0, wc.lpszClassName,
         L"Firestorm TWW 窗口监控器 · 极速C++版 (内存<6MB · CPU<0.05%)",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 860, 460,
+        CW_USEDEFAULT, CW_USEDEFAULT, 870, 470,
         nullptr, nullptr, hInstance, nullptr);
 
     if (!g_hMainWnd) return 2;
@@ -635,6 +751,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     if (g_hFontNormal) DeleteObject(g_hFontNormal);
     if (g_hFontBold) DeleteObject(g_hFontBold);
     if (g_hFontTitle) DeleteObject(g_hFontTitle);
+    if (g_hImageListRow) ImageList_Destroy(g_hImageListRow);
     if (g_hBrushBg) DeleteObject(g_hBrushBg);
     if (g_hBrushNavy) DeleteObject(g_hBrushNavy);
     if (g_hBrushCard) DeleteObject(g_hBrushCard);
