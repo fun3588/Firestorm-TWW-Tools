@@ -64,9 +64,16 @@ enum {
     ID_BTN_CLOSE_PROC,
     ID_BTN_RESET_STATS,
     ID_BTN_TEST_ENTER,
+    ID_EDIT_INTERVAL,
     ID_TIMER_UI = 2001,
     ID_TIMER_SCAN = 2002
 };
+
+// 重试间隔设置 (默认10秒)
+int g_globalRetryInterval = 10;
+HWND g_hIntervalLabel = nullptr;
+HWND g_hIntervalEdit = nullptr;
+HWND g_hIntervalSecLabel = nullptr;
 
 // 辅助宽字符转换
 std::wstring Utf8ToWide(const std::string& str) {
@@ -113,6 +120,7 @@ void ScanProcesses(bool forceAttach = false) {
         if (!exists) {
             auto ctx = std::make_unique<ClientContext>();
             ctx->procInfo = p;
+            ctx->reconnectCtrl->stepIntervalSeconds = g_globalRetryInterval;
             ctx->session->Attach(p.pid, p.hWnd);
             ctx->reconnectCtrl->SetSession(ctx->session.get());
             if (forceAttach) {
@@ -262,34 +270,47 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             12, 10, 860, 32, hWnd, nullptr, g_hInstance, nullptr);
         SendMessageW(g_hHeaderBanner, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
 
-        // 创建扁平工具栏按钮 (高度 30)
-        int btnX = 12, btnY = 50, btnW = 105, btnH = 30, gap = 8;
-        HWND hBtnScan = CreateWindowExW(0, L"BUTTON", L"🔍 刷新客户端", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, btnW, btnH, hWnd, (HMENU)ID_BTN_SCAN, g_hInstance, nullptr);
-        btnX += btnW + gap;
+        // 创建扁平工具栏按钮与重试间隔输入框 (高度 28)
+        int btnX = 12, btnY = 48, btnW = 86, btnH = 28, gap = 6;
+        HWND hBtnScan = CreateWindowExW(0, L"BUTTON", L"🔍 刷新", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            btnX, btnY, 78, btnH, hWnd, (HMENU)ID_BTN_SCAN, g_hInstance, nullptr);
+        btnX += 78 + gap;
 
         HWND hBtnRec = CreateWindowExW(0, L"BUTTON", L"🔄 立即重连", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-            btnX, btnY, btnW, btnH, hWnd, (HMENU)ID_BTN_RECONNECT_NOW, g_hInstance, nullptr);
-        btnX += btnW + gap;
+            btnX, btnY, 96, btnH, hWnd, (HMENU)ID_BTN_RECONNECT_NOW, g_hInstance, nullptr);
+        btnX += 96 + gap;
 
-        HWND hBtnStartAll = CreateWindowExW(0, L"BUTTON", L"▶ 全部监控", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, btnW, btnH, hWnd, (HMENU)ID_BTN_START_ALL, g_hInstance, nullptr);
-        btnX += btnW + gap;
+        HWND hBtnStartAll = CreateWindowExW(0, L"BUTTON", L"▶ 全部开启", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            btnX, btnY, 92, btnH, hWnd, (HMENU)ID_BTN_START_ALL, g_hInstance, nullptr);
+        btnX += 92 + gap;
 
         HWND hBtnStopAll = CreateWindowExW(0, L"BUTTON", L"⏹ 全部停止", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, btnW, btnH, hWnd, (HMENU)ID_BTN_STOP_ALL, g_hInstance, nullptr);
-        btnX += btnW + gap;
+            btnX, btnY, 92, btnH, hWnd, (HMENU)ID_BTN_STOP_ALL, g_hInstance, nullptr);
+        btnX += 92 + gap;
 
-        HWND hBtnClose = CreateWindowExW(0, L"BUTTON", L"❌ 关闭客户端", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, 115, btnH, hWnd, (HMENU)ID_BTN_CLOSE_PROC, g_hInstance, nullptr);
-        btnX += 115 + gap;
+        HWND hBtnClose = CreateWindowExW(0, L"BUTTON", L"❌ 关闭窗口", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            btnX, btnY, 94, btnH, hWnd, (HMENU)ID_BTN_CLOSE_PROC, g_hInstance, nullptr);
+        btnX += 94 + gap;
 
         HWND hBtnReset = CreateWindowExW(0, L"BUTTON", L"🔄 重置时速", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, btnW, btnH, hWnd, (HMENU)ID_BTN_RESET_STATS, g_hInstance, nullptr);
-        btnX += btnW + gap;
+            btnX, btnY, 92, btnH, hWnd, (HMENU)ID_BTN_RESET_STATS, g_hInstance, nullptr);
+        btnX += 92 + gap;
 
         HWND hBtnTest = CreateWindowExW(0, L"BUTTON", L"↵ 后台回车", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            btnX, btnY, btnW, btnH, hWnd, (HMENU)ID_BTN_TEST_ENTER, g_hInstance, nullptr);
+            btnX, btnY, 92, btnH, hWnd, (HMENU)ID_BTN_TEST_ENTER, g_hInstance, nullptr);
+        btnX += 92 + gap + 4;
+
+        // 重试间隔输入 (支持用户自定义填写，默认 10 秒)
+        g_hIntervalLabel = CreateWindowExW(0, L"STATIC", L"重试间隔:", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
+            btnX, btnY, 65, btnH, hWnd, nullptr, g_hInstance, nullptr);
+        btnX += 68;
+
+        g_hIntervalEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"10", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_CENTER,
+            btnX, btnY + 2, 38, btnH - 4, hWnd, (HMENU)ID_EDIT_INTERVAL, g_hInstance, nullptr);
+        btnX += 42;
+
+        g_hIntervalSecLabel = CreateWindowExW(0, L"STATIC", L"秒 (默认10s)", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+            btnX, btnY, 80, btnH, hWnd, nullptr, g_hInstance, nullptr);
 
         SendMessageW(hBtnScan, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
         SendMessageW(hBtnRec, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
@@ -298,11 +319,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(hBtnClose, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
         SendMessageW(hBtnReset, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
         SendMessageW(hBtnTest, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+        SendMessageW(g_hIntervalLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+        SendMessageW(g_hIntervalEdit, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
+        SendMessageW(g_hIntervalSecLabel, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
 
-        // 创建多账号核心 ListView 表格
+        // 创建多账号核心 ListView 表格 (高度适中，最多8个窗体舒适展示，绝无过长)
         g_hListView = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL,
-            12, 90, 860, 390, hWnd, nullptr, g_hInstance, nullptr);
+            12, 84, 836, 275, hWnd, nullptr, g_hInstance, nullptr);
 
         SendMessageW(g_hListView, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
         ListView_SetExtendedListViewStyle(g_hListView, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
@@ -357,13 +381,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         int sbH = rcSb.bottom - rcSb.top;
 
         if (g_hHeaderBanner) SetWindowPos(g_hHeaderBanner, nullptr, 12, 10, w - 24, 30, SWP_NOZORDER);
-        if (g_hDetailLabel) SetWindowPos(g_hDetailLabel, nullptr, 12, h - sbH - 30, w - 24, 24, SWP_NOZORDER);
-        if (g_hListView) SetWindowPos(g_hListView, nullptr, 12, 90, w - 24, h - sbH - 130, SWP_NOZORDER);
+        if (g_hDetailLabel) SetWindowPos(g_hDetailLabel, nullptr, 12, h - sbH - 28, w - 24, 22, SWP_NOZORDER);
+        if (g_hListView) SetWindowPos(g_hListView, nullptr, 12, 84, w - 24, h - sbH - 120, SWP_NOZORDER);
         break;
     }
 
     case WM_COMMAND: {
         int id = LOWORD(wParam);
+        int code = HIWORD(wParam);
+
+        if (id == ID_EDIT_INTERVAL && code == EN_CHANGE) {
+            wchar_t buf[32] = {0};
+            GetWindowTextW(g_hIntervalEdit, buf, 32);
+            int val = _wtoi(buf);
+            if (val >= 1 && val <= 300) {
+                g_globalRetryInterval = val;
+                std::lock_guard<std::mutex> lock(g_contextMutex);
+                for (auto& ctx : g_contexts) {
+                    ctx->reconnectCtrl->stepIntervalSeconds = val;
+                }
+            }
+            break;
+        }
+
         switch (id) {
         case ID_BTN_SCAN:
             ScanProcesses(false);
@@ -520,11 +560,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     if (!RegisterClassExW(&wc)) return 1;
 
-    // 创建主窗口 (880x580)
+    // 创建主窗口 (紧凑尺寸 860x460，针对最多8个窗体深度优化，不过长)
     g_hMainWnd = CreateWindowExW(0, wc.lpszClassName,
-        L"Firestorm TWW 窗口监控器 · 极速C++版 (内存<8MB · CPU<0.05%)",
+        L"Firestorm TWW 窗口监控器 · 极速C++版 (内存<6MB · CPU<0.05%)",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 920, 600,
+        CW_USEDEFAULT, CW_USEDEFAULT, 860, 460,
         nullptr, nullptr, hInstance, nullptr);
 
     if (!g_hMainWnd) return 2;

@@ -22,7 +22,7 @@ private:
 
 public:
     std::atomic<bool> autoReconnectEnabled{true};
-    int stepIntervalSeconds = 4;
+    int stepIntervalSeconds = 10; // 默认 10 秒自动重试
     std::atomic<int> reconnectCount{0};
     std::atomic<int> currentRetryAttempts{0};
     ReconnectState currentState = ReconnectState::InWorld;
